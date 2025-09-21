@@ -9,33 +9,46 @@ El objetivo arquitectónico es recorrer recursivamente un árbol de directorios 
 En alto nivel, el flujo es el siguiente:
 
 ```mermaid
+---
+config:
+  layout: dagre
+  theme: mc
+---
 flowchart TD
-    A[Inicio CLI (argparse)] --> B[Inicialización]
-    B --> B1[Logger rotatorio (scan_errores.log)]
-    B --> B2[BD SQLite (processed_files, scan_progress)]
-    B --> B3[Lectura de flags (--root, --scan-mode, etc.)]
-
-    B --> C[Walker de archivos (os.walk + normalize_path)]
-    C -->|Cada archivo| D[os.stat con reintento]
-    D -->|Error| E1[Fila de error (stat)]
-    D -->|OK| E2[Filtros de extensión y exclusión]
-    E2 --> F[Metadatos (tamaño, extensión, nombre)]
-    F --> G1[MD5 en streaming]
-    F --> G2{¿Es PDF?}
+ subgraph Resultados["Resultados"]
+        R1["CSV(s) de inventario"]
+        K["Escribir fila en CSV\n(safe_writerow con reintentos)"]
+        R2["scan_errores.log"]
+        B1["Logger rotatorio\n(scan_errores.log)"]
+        R3["scan_state.sqlite"]
+        B2["BD SQLite\n(processed_files, scan_progress)"]
+  end
+    A["Inicio CLI\n(argparse)"] --> B["Inicialización"]
+    B --> B1 & B2 & B3["Config flags\n(--root, --scan-mode, etc.)"] & C["Walker de archivos\n(os.walk + normalize_path)"]
+    C -- Cada archivo --> D["os.stat con reintento"]
+    D -- Error --> E1["Fila CSV con\nerror_file=\stat:...\"]
+    D -- OK --> E2["Filtros de extensión/dir"]
+    E2 --> F["Metadatos básicos\n(tamaño KB/MB, ext, nombre)"]
+    F --> G1["MD5 streaming\n(script MD5)"] & G2{"¿Es PDF?"}
     G1 --> G2
-    G2 -->|Sí| H[Clasificación PDF]
-    G2 -->|No| I[Escritura directa en CSV]
-    H --> J[Combinar errores → error_file]
+    G2 -- Sí --> H["Clasificación PDF\n(PyMuPDF, hilos opcionales)"]
+    G2 -- No --> I["Salto a Escritura CSV"]
+    H --> J["Combinar errores\n(MD5/PDF) → error_file"]
     I --> J
-    J --> K[Escribir fila en CSV (safe_writerow)]
-    K --> L[Actualizar processed_files]
-    L --> M[Commit periódico + GC]
+    J --> K
+    K --> L["Actualizar estado SQLite\n(upsert_state)"] & R1
+    L --> M["Commit periódico + GC"]
     M --> C
-    subgraph Resultados
-        K --> R1[CSV(s)]
-        B1 --> R2[scan_errores.log]
-        B2 --> R3[scan_state.sqlite]
-    end
+    B1 --> R2
+    B2 --> R3
+    D,E2,F,G1,G2,H,I,J,K,L,M["D,E2,F,G1,G2,H,I,J,K,L,M"]
+    R1,R2,R3["R1,R2,R3"]
+    style A fill:#3366cc,stroke:#fff,color:#fff
+    style B fill:#003366,stroke:#fff,color:#fff
+    style C fill:#6699cc,stroke:#003366,color:#fff
+    style E1 fill:#ffcccc,stroke:#900,color:#000
+    style D,E2,F,G1,G2,H,I,J,K,L,M fill:#f2f2f2,stroke:#333,color:#000
+    style R1,R2,R3 fill:#e6ffe6,stroke:#333,color:#000
 ```
 
 ### Diseño de reanudación
